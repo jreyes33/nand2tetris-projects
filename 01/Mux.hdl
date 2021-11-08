@@ -1,0 +1,51 @@
+// This file is part of www.nand2tetris.org
+// and the book "The Elements of Computing Systems"
+// by Nisan and Schocken, MIT Press.
+// File name: projects/01/Mux.hdl
+
+/**
+ * Multiplexor:
+ * out = a if sel == 0
+ *       b otherwise
+
+|   a   |   b   |  sel  |  out  |
+|   0   |   0   |   0   |   0   |
+|   0   |   0   |   1   |   0   |
+|   0   |   1   |   0   |   0   |
+|   0   |   1   |   1   |   1   | Not(a) And b And sel
+|   1   |   0   |   0   |   1   | a And Not(b) And Not(sel)
+|   1   |   0   |   1   |   0   |
+|   1   |   1   |   0   |   1   | a And b And Not(sel)
+|   1   |   1   |   1   |   1   | a And b And sel
+
+a And Not(b) And Not(sel)
+a And b And Not(sel)
+Not(a) And b And sel
+a And b And sel
+
+sel And ((Not(a) And b) Or (a And b))
+Not(sel) And ((a And Not(b)) Or (a And b))
+
+  Not(in=a, out=notA);
+  Not(in=b, out=notB);
+  Not(in=sel, out=notSel);
+  And(a=a, b=b, out=aAndB);
+  And(a=notA, b=b, out=notAAndB);
+  And(a=a, b=notB, out=aAndNotB);
+  Or(a=notAAndB, b=aAndB, out=notAAndBOrAAndB);
+  Or(a=aAndNotB, b=aAndB, out=aAndNotBOrAAndB);
+  And(a=notAAndBOrAAndB, b=sel, out=selOn);
+  And(a=aAndNotBOrAAndB, b=notSel, out=selOff);
+  Or(a=selOn, b=selOff, out=out);
+ */
+
+CHIP Mux {
+    IN a, b, sel;
+    OUT out;
+
+    PARTS:
+    Not(in=sel, out=notSel);
+    And(a=a, b=notSel, out=selOff);
+    And(a=b, b=sel, out=selOn);
+    Or(a=selOn, b=selOff, out=out);
+}
