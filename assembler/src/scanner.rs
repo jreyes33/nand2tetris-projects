@@ -1,3 +1,4 @@
+use crate::error::{Error, Result};
 use crate::token::{Kind, Token};
 
 pub struct Scanner<'s> {
@@ -19,17 +20,17 @@ impl<'s> Scanner<'s> {
         }
     }
 
-    pub fn scan_tokens(&mut self) -> &[Token] {
+    pub fn scan_tokens(&mut self) -> Result<'s, &[Token]> {
         while !self.is_at_end() {
             self.start = self.current;
-            self.scan_token();
+            self.scan_token()?;
         }
         let eof = Token::new(Kind::Eof, self.line, "");
         self.tokens.push(eof);
-        &self.tokens
+        Ok(&self.tokens)
     }
 
-    fn scan_token(&mut self) {
+    fn scan_token(&mut self) -> Result<'s, ()> {
         let c = self.advance();
         use Kind::*;
         match c {
@@ -54,22 +55,32 @@ impl<'s> Scanner<'s> {
                     }
                 }
             }
-            '0'..='9' => self.number(),
+            '0'..='9' => self.number()?,
             'a'..='z' | 'A'..='Z' => self.identifier(),
             ' ' | '\r' | '\t' => (),
-            // TODO: use Result error instead.
-            _ => panic!("Unexpected character: {}", c),
+            _ => {
+                return Err(Error::scan(
+                    self.line,
+                    self.lexeme(),
+                    "unexpected character",
+                ))
+            }
         }
+        Ok(())
     }
 
-    fn number(&mut self) {
+    fn number(&mut self) -> Result<'s, ()> {
         while matches!(self.peek(), Some('0'..='9')) {
             self.advance();
         }
-        // TODO: use Result error instead.
-        let kind = Kind::Number(self.source[self.start..self.current].parse().unwrap());
-        let token = Token::new(kind, self.line, &self.source[self.start..self.current]);
+        let lexeme = self.lexeme();
+        let n = lexeme
+            .parse()
+            .map_err(|_| Error::scan(self.line, lexeme, "invalid number"))?;
+        let kind = Kind::Number(n);
+        let token = Token::new(kind, self.line, self.lexeme());
         self.tokens.push(token);
+        Ok(())
     }
 
     fn identifier(&mut self) {
@@ -79,21 +90,19 @@ impl<'s> Scanner<'s> {
         ) {
             self.advance();
         }
-        let text = &self.source[self.start..self.current];
-        let kind = Kind::Identifier(text);
-        let token = Token::new(kind, self.line, &self.source[self.start..self.current]);
+        let kind = Kind::Identifier(self.lexeme());
+        let token = Token::new(kind, self.line, self.lexeme());
         self.tokens.push(token);
     }
 
     fn add_token(&mut self, kind: Kind<'s>) {
-        let token = Token::new(kind, self.line, &self.source[self.start..self.current]);
+        let token = Token::new(kind, self.line, self.lexeme());
         self.tokens.push(token);
     }
 
     fn advance(&mut self) -> char {
         let mut char_indices = self.source[self.current..].char_indices().peekable();
-        // TODO: use Result error instead.
-        let (_, c) = char_indices.next().unwrap();
+        let (_, c) = char_indices.next().expect("should have next char");
         let inc = if let Some((next_idx, _)) = char_indices.peek() {
             *next_idx
         } else {
@@ -101,6 +110,10 @@ impl<'s> Scanner<'s> {
         };
         self.current += inc;
         c
+    }
+
+    fn lexeme(&self) -> &'s str {
+        &self.source[self.start..self.current]
     }
 
     fn peek(&self) -> Option<char> {
