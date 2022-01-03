@@ -1,0 +1,9 @@
+[package]
+name = "vm-translator"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Hack VM translator"
+
+[dependencies]
+nom = "7.1.0"
