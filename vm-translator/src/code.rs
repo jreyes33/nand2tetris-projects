@@ -100,10 +100,7 @@ fn pop_static(prefix: &str, i: u16) -> String {
 }
 
 fn pop_pointer(i: u16) -> String {
-    format!(
-        hasm!(take!(1), "D=M", "@{addr}", "M=D"),
-        addr = point_to(i)
-    )
+    format!(hasm!(take!(1), "D=M", "@{addr}", "M=D"), addr = point_to(i))
 }
 
 fn push(segment: Segment, i: u16, static_prefix: &str) -> String {
@@ -120,7 +117,10 @@ fn push(segment: Segment, i: u16, static_prefix: &str) -> String {
 }
 
 fn push_constant(i: u16) -> String {
-    format!(hasm!("@{}", "D=A", "@SP", "A=M", "M=D", "@SP", "M=M+1"), i)
+    format!(
+        hasm!("@{i}", "D=A", "@SP", "A=M", "M=D", "@SP", "M=M+1"),
+        i = i
+    )
 }
 
 fn push_i(base_addr: &str, i: u16) -> String {
