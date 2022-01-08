@@ -7,3 +7,4 @@ description = "Hack VM translator"
 
 [dependencies]
 nom = "7.1.0"
+rayon = "1.5.1"

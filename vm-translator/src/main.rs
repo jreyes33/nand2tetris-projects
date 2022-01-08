@@ -4,7 +4,6 @@ mod parser;
 use code::translate;
 use parser::parse;
 use std::env::args;
-use std::fmt::Write;
 use std::path::Path;
 use std::{fs, process};
 
@@ -37,10 +36,18 @@ fn translate_str(input: &str, file_name: &str) -> Result<String> {
         eprintln!("[line {}] failed to parse entire input", commands.len());
         process::exit(65);
     }
-    let mut output = String::new();
-    for command in commands.iter().flatten() {
-        writeln!(output, "{}", translate(command, file_name))?;
-    }
+    // use std::fmt::Write;
+    // let mut output = String::new();
+    // for command in commands.iter().flatten() {
+    //     writeln!(output, "{}", translate(command, file_name))?;
+    // }
+    use rayon::iter::IntoParallelRefIterator;
+    use rayon::iter::ParallelIterator;
+    let output = commands
+        .par_iter()
+        .flatten()
+        .map(|c| translate(c, file_name))
+        .collect();
     Ok(output)
 }
 
