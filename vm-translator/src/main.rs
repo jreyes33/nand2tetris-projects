@@ -11,7 +11,7 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync 
 
 fn main() -> Result<()> {
     if args().count() != 2 {
-        println!("Usage: vm-translator [file]");
+        eprintln!("Usage: vm-translator [file]");
     } else if let Some(arg) = args().nth(1) {
         translate_file(arg)?;
     }
@@ -26,7 +26,8 @@ fn translate_file<P: AsRef<Path>>(path: P) -> Result<()> {
         .and_then(|f| f.to_str())
         .ok_or("invalid file name")?;
     let source = fs::read_to_string(path_ref)?;
-    fs::write(out_path, translate_str(&source, file_name)?)?;
+    fs::write(&out_path, translate_str(&source, file_name)?)?;
+    eprintln!("Successfully wrote {}", out_path.to_string_lossy());
     Ok(())
 }
 
@@ -36,12 +37,7 @@ fn translate_str(input: &str, file_name: &str) -> Result<String> {
         eprintln!("[line {}] failed to parse entire input", commands.len());
         process::exit(65);
     }
-    let output = commands
-        .iter()
-        .flatten()
-        .map(|c| translate(c, file_name))
-        .collect();
-    Ok(output)
+    Ok(translate(&commands, file_name))
 }
 
 fn exit_with_error<V, E: std::error::Error>(e: E) -> V {

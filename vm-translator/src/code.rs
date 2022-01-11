@@ -1,6 +1,15 @@
 use crate::parser::Command::{self, *};
 use crate::parser::Segment::{self, *};
 
+pub fn translate(commands: &[Option<Command>], static_prefix: &str) -> String {
+    let mut translator = Translator::default();
+    commands
+        .iter()
+        .flatten()
+        .map(|c| translator.translate(c, static_prefix))
+        .collect()
+}
+
 macro_rules! hasm {
     ($($line:expr),* $(,)?) => {
         concat!($($line, '\n',)*)
@@ -9,32 +18,71 @@ macro_rules! hasm {
 
 macro_rules! take {
     (1) => {
-        hasm!("@SP", "AM=M-1")
+        hasm!("@SP", "AM=M-1", "D=M")
     };
     (2) => {
-        hasm!(take!(1), "D=M", "@SP", "A=M-1")
+        hasm!(take!(1), "@SP", "A=M-1")
     };
 }
 
-pub fn translate(command: &Command, static_prefix: &str) -> String {
-    match command {
-        Pop(segment, i) => pop(*segment, *i, static_prefix),
-        Push(segment, i) => push(*segment, *i, static_prefix),
-        _ => arithmetic(command).to_string(),
+macro_rules! push_d {
+    () => {
+        hasm!("@SP", "A=M", "M=D", "@SP", "M=M+1")
+    };
+}
+
+#[derive(Default)]
+struct Translator {
+    cond_counter: u16,
+}
+
+impl Translator {
+    fn translate(&mut self, command: &Command, static_prefix: &str) -> String {
+        match command {
+            Pop(segment, i) => pop(*segment, *i, static_prefix),
+            Push(segment, i) => push(*segment, *i, static_prefix),
+            Eq | Gt | Lt => {
+                let code = conditional(command, self.cond_counter);
+                self.cond_counter += 1;
+                code
+            }
+            _ => arithmetic(command).to_string(),
+        }
     }
+}
+
+fn conditional(command: &Command, counter: u16) -> String {
+    let jump = match command {
+        Eq => "JEQ",
+        Gt => "JGT",
+        Lt => "JLT",
+        _ => unreachable!("should not be called with any other command"),
+    };
+    format!(
+        hasm!(
+            take!(2),
+            "D=M-D",
+            "M=-1",
+            "@COND_{c}",
+            "D;{jump}",
+            "@SP",
+            "A=M-1",
+            "M=0",
+            "(COND_{c})",
+        ),
+        c = counter,
+        jump = jump,
+    )
 }
 
 fn arithmetic(command: &Command) -> &'static str {
     match command {
         Add => hasm!(take!(2), "M=D+M"),
         Sub => hasm!(take!(2), "M=M-D"),
-        Neg => hasm!(take!(1), "M=-M"),
-        Eq => todo!(),
-        Gt => todo!(),
-        Lt => todo!(),
+        Neg => hasm!("@SP", "A=M-1", "M=-M"),
         And => hasm!(take!(2), "M=D&M"),
         Or => hasm!(take!(2), "M=D|M"),
-        Not => hasm!(take!(1), "M=!M"),
+        Not => hasm!("@SP", "A=M-1", "M=!M"),
         _ => unreachable!("should not be called with any other command"),
     }
 }
@@ -60,15 +108,14 @@ fn pop_i(base_addr: &str, i: u16) -> String {
             "@{base_addr}",
             "D=D+M",
             "@R13",
-            "M=D", // @R13 has the target address where we want to store the popped value.
-            take!(1),
-            "D=M", // D has the popped value.
+            "M=D",    // @R13 has the target address where we want to store the popped value.
+            take!(1), // D has the popped value.
             "@R13",
             "A=M",
             "M=D", // Finally, the value is stored in the target address.
         ),
         i = i,
-        base_addr = base_addr
+        base_addr = base_addr,
     )
 }
 
@@ -80,9 +127,8 @@ fn pop_temp(i: u16) -> String {
             "@5",
             "D=D+A",
             "@R13",
-            "M=D", // @R13 has the target address where we want to store the popped value.
-            take!(1),
-            "D=M", // D has the popped value.
+            "M=D",    // @R13 has the target address where we want to store the popped value.
+            take!(1), // D has the popped value.
             "@R13",
             "A=M",
             "M=D", // Finally, the value is stored in the target address.
@@ -93,14 +139,14 @@ fn pop_temp(i: u16) -> String {
 
 fn pop_static(prefix: &str, i: u16) -> String {
     format!(
-        hasm!(take!(1), "D=M", "@{prefix}.{i}", "M=D"),
+        hasm!(take!(1), "@{prefix}.{i}", "M=D"),
         prefix = prefix,
         i = i,
     )
 }
 
 fn pop_pointer(i: u16) -> String {
-    format!(hasm!(take!(1), "D=M", "@{addr}", "M=D"), addr = point_to(i))
+    format!(hasm!(take!(1), "@{addr}", "M=D"), addr = point_to(i))
 }
 
 fn push(segment: Segment, i: u16, static_prefix: &str) -> String {
@@ -117,52 +163,34 @@ fn push(segment: Segment, i: u16, static_prefix: &str) -> String {
 }
 
 fn push_constant(i: u16) -> String {
-    format!(
-        hasm!("@{i}", "D=A", "@SP", "A=M", "M=D", "@SP", "M=M+1"),
-        i = i
-    )
+    format!(hasm!("@{i}", "D=A", push_d!()), i = i)
 }
 
 fn push_i(base_addr: &str, i: u16) -> String {
     format!(
-        hasm!(
-            "@{i}",
-            "D=A",
-            "@{base_addr}",
-            "D=D+M",
-            "A=D",
-            "D=M",
-            "@SP",
-            "A=M",
-            "M=D",
-            "@SP",
-            "M=M+1"
-        ),
+        hasm!("@{i}", "D=A", "@{base_addr}", "AD=D+M", "D=M", push_d!()),
         i = i,
-        base_addr = base_addr
+        base_addr = base_addr,
     )
 }
 
 fn push_temp(i: u16) -> String {
     format!(
-        hasm!("@{i}", "D=A", "@5", "D=D+A", "A=D", "D=M", "@SP", "A=M", "M=D", "@SP", "M=M+1"),
+        hasm!("@{i}", "D=A", "@5", "AD=D+A", "D=M", push_d!()),
         i = i,
     )
 }
 
 fn push_static(prefix: &str, i: u16) -> String {
     format!(
-        hasm!("@{prefix}.{i}", "D=M", "@SP", "A=M", "M=D", "@SP", "M=M+1"),
+        hasm!("@{prefix}.{i}", "D=M", push_d!()),
         prefix = prefix,
-        i = i
+        i = i,
     )
 }
 
 fn push_pointer(i: u16) -> String {
-    format!(
-        hasm!("@{addr}", "D=M", "@SP", "A=M", "M=D", "@SP", "M=M+1"),
-        addr = point_to(i)
-    )
+    format!(hasm!("@{addr}", "D=M", push_d!()), addr = point_to(i))
 }
 
 fn point_to(i: u16) -> &'static str {
