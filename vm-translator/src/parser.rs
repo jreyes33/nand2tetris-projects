@@ -25,8 +25,8 @@ pub enum Command<'s> {
     Label(&'s str),
     Goto(&'s str),
     IfGoto(&'s str),
-    Call(&'s str),
-    Function(&'s str),
+    Call(&'s str, u16),
+    Function(&'s str, u16),
     Pop(Segment, u16),
     Push(Segment, u16),
 }
@@ -51,6 +51,14 @@ fn comment(input: &str) -> Result<()> {
 
 fn number(input: &str) -> IResult<&str, u16> {
     map_res(digit1, |s: &str| s.parse())(input)
+}
+
+// Based on https://github.com/Geal/nom/blob/e99f9e0/doc/nom_recipes.md#identifiers
+fn identifier(input: &str) -> IResult<&str, &str> {
+    recognize(pair(
+        alt((alpha1, tag("_"))),
+        many0(alt((alphanumeric1, tag("_"), tag(".")))),
+    ))(input)
 }
 
 fn segment(input: &str) -> IResult<&str, Segment> {
@@ -85,35 +93,23 @@ fn nullary_cmd(input: &str) -> IResult<&str, Command> {
 fn unary_cmd(input: &str) -> IResult<&str, Command> {
     map(
         pair(
-            alt((
-                tag("label"),
-                tag("goto"),
-                tag("if-goto"),
-                tag("call"),
-                tag("function"),
-            )),
+            alt((tag("label"), tag("goto"), tag("if-goto"))),
             preceded(space1, identifier),
         ),
         |(cmd, ident)| match cmd {
             "label" => Command::Label(ident),
             "goto" => Command::Goto(ident),
             "if-goto" => Command::IfGoto(ident),
-            "call" => Command::Call(ident),
-            "function" => Command::Function(ident),
             _ => unreachable!("no other strings are possible"),
         },
     )(input)
 }
 
-// Copied from https://github.com/Geal/nom/blob/e99f9e0/doc/nom_recipes.md#identifiers
-fn identifier(input: &str) -> IResult<&str, &str> {
-    recognize(pair(
-        alt((alpha1, tag("_"))),
-        many0(alt((alphanumeric1, tag("_")))),
-    ))(input)
+fn binary_cmd(input: &str) -> IResult<&str, Command> {
+    alt((pop_or_push, call_or_function))(input)
 }
 
-fn binary_cmd(input: &str) -> IResult<&str, Command> {
+fn pop_or_push(input: &str) -> IResult<&str, Command> {
     map(
         tuple((
             alt((tag("pop"), tag("push"))),
@@ -123,6 +119,21 @@ fn binary_cmd(input: &str) -> IResult<&str, Command> {
         |(cmd, seg, n)| match cmd {
             "pop" => Command::Pop(seg, n),
             "push" => Command::Push(seg, n),
+            _ => unreachable!("no other strings are possible"),
+        },
+    )(input)
+}
+
+fn call_or_function(input: &str) -> IResult<&str, Command> {
+    map(
+        tuple((
+            alt((tag("call"), tag("function"))),
+            delimited(space1, identifier, space1),
+            number,
+        )),
+        |(cmd, ident, n)| match cmd {
+            "call" => Command::Call(ident, n),
+            "function" => Command::Function(ident, n),
             _ => unreachable!("no other strings are possible"),
         },
     )(input)
@@ -175,6 +186,7 @@ mod tests {
     fn test_identifier() {
         assert_eq!(identifier("FOO_0"), Ok(("", "FOO_0")));
         assert_eq!(identifier("bar1"), Ok(("", "bar1")));
+        assert_eq!(identifier("Foo.bar"), Ok(("", "Foo.bar")));
         assert!(identifier("1foo").is_err());
     }
 
@@ -191,11 +203,6 @@ mod tests {
         assert_eq!(unary_cmd("label   FOO"), Ok(("", Command::Label("FOO"))));
         assert_eq!(unary_cmd("goto    FOO"), Ok(("", Command::Goto("FOO"))));
         assert_eq!(unary_cmd("if-goto FOO"), Ok(("", Command::IfGoto("FOO"))));
-        assert_eq!(unary_cmd("call FOO"), Ok(("", Command::Call("FOO"))));
-        assert_eq!(
-            unary_cmd("function FOO"),
-            Ok(("", Command::Function("FOO")))
-        );
         assert!(unary_cmd("label 1").is_err());
         assert!(unary_cmd("call").is_err());
     }
@@ -210,12 +217,18 @@ mod tests {
             binary_cmd("pop    that    42"),
             Ok(("", Command::Pop(Segment::That, 42)))
         );
+        assert_eq!(binary_cmd("call A.b 1"), Ok(("", Command::Call("A.b", 1))));
+        assert_eq!(
+            binary_cmd("function C.d 0"),
+            Ok(("", Command::Function("C.d", 0)))
+        );
         assert!(binary_cmd("add").is_err());
         assert!(binary_cmd("pop").is_err());
         assert!(binary_cmd("push that").is_err());
         assert!(binary_cmd("nope that 1").is_err());
         assert!(binary_cmd("pop this -20").is_err());
         assert!(binary_cmd("pop invalidsegment 2").is_err());
+        assert!(binary_cmd("function 1error 2").is_err());
     }
 
     #[test]
