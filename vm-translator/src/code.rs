@@ -47,12 +47,75 @@ impl Translator {
                 code
             }
             Add | Sub | Neg | And | Or | Not => arithmetic(command).to_string(),
-            Label(ident) => format!(hasm!("({ident})"), ident = ident),
+            Label(ident) => label(ident),
             Goto(ident) => format!(hasm!("@{ident}", "0;JMP"), ident = ident),
             IfGoto(ident) => format!(hasm!(take!(1), "@{ident}", "D;JNE"), ident = ident),
+            Function(ident, i) => function(ident, *i),
+            Return => return_().to_string(),
             pending => todo!("pls handle {:?}", pending),
         }
     }
+}
+
+fn label(name: &str) -> String {
+    format!(hasm!("({name})"), name = name)
+}
+
+fn function(name: &str, locals_count: u16) -> String {
+    let mut code = label(name);
+    for _ in 0..locals_count {
+        code.push_str(hasm!("@SP", "A=M", "M=0", "@SP", "M=M+1"));
+    }
+    code
+}
+
+fn return_() -> &'static str {
+    hasm!(
+        "@LCL",
+        "D=M",
+        "@R14",
+        "M=D", // save endframe to R14
+        "@5",
+        "D=D-A",
+        "@R15",
+        "M=D", // save retaddr to R15
+        take!(1),
+        "@ARG",
+        "A=M",
+        "M=D", // reposition return value
+        "D=A",
+        "@SP",
+        "M=D+1", // reposition SP
+        "@R14",
+        "A=M-1",
+        "D=M",
+        "@THAT",
+        "M=D", // restore THAT
+        "@R14",
+        "D=M-1",
+        "A=D-1",
+        "D=M",
+        "@THIS",
+        "M=D", // restore THIS
+        "@R14",
+        "D=M-1",
+        "D=D-1",
+        "A=D-1",
+        "D=M",
+        "@ARG",
+        "M=D", // restore ARG
+        "@R14",
+        "D=M-1",
+        "D=D-1",
+        "D=D-1",
+        "A=D-1",
+        "D=M",
+        "@LCL",
+        "M=D", // restore LCL
+        "@R15",
+        "A=M",
+        "0;JMP", // jump to retaddr
+    )
 }
 
 fn conditional(command: &Command, counter: u16) -> String {
