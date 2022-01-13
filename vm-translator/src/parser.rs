@@ -1,15 +1,17 @@
 use nom::{
     branch::alt,
     bytes::complete::tag,
-    character::complete::{digit1, line_ending, not_line_ending, space0, space1},
-    combinator::{map, map_res, opt},
-    multi::separated_list0,
+    character::complete::{
+        alpha1, alphanumeric1, digit1, line_ending, not_line_ending, space0, space1,
+    },
+    combinator::{map, map_res, opt, recognize},
+    multi::{many0, separated_list0},
     sequence::{delimited, pair, preceded, terminated, tuple},
     IResult,
 };
 
 #[derive(Debug, PartialEq)]
-pub enum Command {
+pub enum Command<'s> {
     Add,
     Sub,
     Neg,
@@ -19,6 +21,12 @@ pub enum Command {
     And,
     Or,
     Not,
+    Return,
+    Label(&'s str),
+    Goto(&'s str),
+    IfGoto(&'s str),
+    Call(&'s str),
+    Function(&'s str),
     Pop(Segment, u16),
     Push(Segment, u16),
 }
@@ -70,6 +78,38 @@ fn nullary_cmd(input: &str) -> IResult<&str, Command> {
         map(tag("and"), |_| Command::And),
         map(tag("or"), |_| Command::Or),
         map(tag("not"), |_| Command::Not),
+        map(tag("return"), |_| Command::Return),
+    ))(input)
+}
+
+fn unary_cmd(input: &str) -> IResult<&str, Command> {
+    map(
+        pair(
+            alt((
+                tag("label"),
+                tag("goto"),
+                tag("if-goto"),
+                tag("call"),
+                tag("function"),
+            )),
+            preceded(space1, identifier),
+        ),
+        |(cmd, ident)| match cmd {
+            "label" => Command::Label(ident),
+            "goto" => Command::Goto(ident),
+            "if-goto" => Command::IfGoto(ident),
+            "call" => Command::Call(ident),
+            "function" => Command::Function(ident),
+            _ => unreachable!("no other strings are possible"),
+        },
+    )(input)
+}
+
+// Copied from https://github.com/Geal/nom/blob/e99f9e0/doc/nom_recipes.md#identifiers
+fn identifier(input: &str) -> IResult<&str, &str> {
+    recognize(pair(
+        alt((alpha1, tag("_"))),
+        many0(alt((alphanumeric1, tag("_")))),
     ))(input)
 }
 
@@ -89,7 +129,7 @@ fn binary_cmd(input: &str) -> IResult<&str, Command> {
 }
 
 fn command(input: &str) -> IResult<&str, Command> {
-    alt((nullary_cmd, binary_cmd))(input)
+    alt((nullary_cmd, unary_cmd, binary_cmd))(input)
 }
 
 fn line(input: &str) -> IResult<&str, Option<Command>> {
@@ -132,10 +172,32 @@ mod tests {
     }
 
     #[test]
+    fn test_identifier() {
+        assert_eq!(identifier("FOO_0"), Ok(("", "FOO_0")));
+        assert_eq!(identifier("bar1"), Ok(("", "bar1")));
+        assert!(identifier("1foo").is_err());
+    }
+
+    #[test]
     fn test_nullary_cmd() {
         assert_eq!(nullary_cmd("add"), Ok(("", Command::Add)));
         assert_eq!(nullary_cmd("lt"), Ok(("", Command::Lt)));
+        assert_eq!(nullary_cmd("return"), Ok(("", Command::Return)));
         assert!(nullary_cmd("push").is_err());
+    }
+
+    #[test]
+    fn test_unary_cmd() {
+        assert_eq!(unary_cmd("label   FOO"), Ok(("", Command::Label("FOO"))));
+        assert_eq!(unary_cmd("goto    FOO"), Ok(("", Command::Goto("FOO"))));
+        assert_eq!(unary_cmd("if-goto FOO"), Ok(("", Command::IfGoto("FOO"))));
+        assert_eq!(unary_cmd("call FOO"), Ok(("", Command::Call("FOO"))));
+        assert_eq!(
+            unary_cmd("function FOO"),
+            Ok(("", Command::Function("FOO")))
+        );
+        assert!(unary_cmd("label 1").is_err());
+        assert!(unary_cmd("call").is_err());
     }
 
     #[test]
@@ -159,6 +221,7 @@ mod tests {
     #[test]
     fn test_command() {
         assert_eq!(command("sub"), Ok(("", Command::Sub)));
+        assert_eq!(command("label FOO"), Ok(("", Command::Label("FOO"))));
         assert_eq!(
             command("push this 0"),
             Ok(("", Command::Push(Segment::This, 0)))
