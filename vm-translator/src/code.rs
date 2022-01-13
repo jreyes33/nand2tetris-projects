@@ -1,15 +1,6 @@
 use crate::parser::Command::{self, *};
 use crate::parser::Segment::{self, *};
 
-pub fn translate(commands: &[Option<Command>], static_prefix: &str) -> String {
-    let mut translator = Translator::default();
-    commands
-        .iter()
-        .flatten()
-        .map(|c| translator.translate(c, static_prefix))
-        .collect()
-}
-
 macro_rules! hasm {
     ($($line:expr),* $(,)?) => {
         concat!($($line, '\n',)*)
@@ -31,9 +22,24 @@ macro_rules! push_d {
     };
 }
 
+pub fn translate(commands: &[Option<Command>], static_prefix: &str) -> String {
+    let mut translator = Translator::default();
+    commands
+        .iter()
+        .flatten()
+        .map(|c| translator.translate(c, static_prefix))
+        .collect()
+}
+
+pub fn boot() -> String {
+    // Set SP to 256 and static_prefix Sys.init.
+    hasm!("@256", "D=A", "@SP", "M=D").to_string() + &call("Sys.init", "BOOT", 0, 0)
+}
+
 #[derive(Default)]
 struct Translator {
     cond_counter: u16,
+    call_counter: u16,
 }
 
 impl Translator {
@@ -42,17 +48,19 @@ impl Translator {
             Pop(segment, i) => pop(*segment, *i, static_prefix),
             Push(segment, i) => push(*segment, *i, static_prefix),
             Eq | Gt | Lt => {
-                let code = conditional(command, self.cond_counter);
                 self.cond_counter += 1;
-                code
+                conditional(command, static_prefix, self.cond_counter)
             }
             Add | Sub | Neg | And | Or | Not => arithmetic(command).to_string(),
             Label(ident) => label(ident),
             Goto(ident) => format!(hasm!("@{ident}", "0;JMP"), ident = ident),
             IfGoto(ident) => format!(hasm!(take!(1), "@{ident}", "D;JNE"), ident = ident),
+            Call(ident, i) => {
+                self.call_counter += 1;
+                call(ident, static_prefix, *i, self.call_counter)
+            }
             Function(ident, i) => function(ident, *i),
             Return => return_().to_string(),
-            pending => todo!("pls handle {:?}", pending),
         }
     }
 }
@@ -61,10 +69,51 @@ fn label(name: &str) -> String {
     format!(hasm!("({name})"), name = name)
 }
 
+fn call(function_name: &str, static_prefix: &str, args_count: u16, counter: u16) -> String {
+    format!(
+        hasm!(
+            "@CALL_RET_{static_prefix}_{counter}",
+            "D=A",
+            push_d!(), // save return address
+            "@LCL",
+            "D=M",
+            push_d!(), // save LCL
+            "@ARG",
+            "D=M",
+            push_d!(), // save ARG
+            "@THIS",
+            "D=M",
+            push_d!(), // save THIS
+            "@THAT",
+            "D=M",
+            push_d!(), // save THAT
+            "@SP",
+            "D=M",
+            "@5",
+            "D=D-A",
+            "@{args_count}",
+            "D=D-A",
+            "@ARG",
+            "M=D", // reposition ARG
+            "@SP",
+            "D=M",
+            "@LCL",
+            "M=D", // reposition LCL
+            "@{function_name}",
+            "0;JMP", // jump to function
+            "(CALL_RET_{static_prefix}_{counter})",
+        ),
+        static_prefix = static_prefix,
+        counter = counter,
+        args_count = args_count,
+        function_name = function_name,
+    )
+}
+
 fn function(name: &str, locals_count: u16) -> String {
     let mut code = label(name);
     for _ in 0..locals_count {
-        code.push_str(hasm!("@SP", "AM=M+1", "A=A-1", "M=0"));
+        code += hasm!("@SP", "AM=M+1", "A=A-1", "M=0");
     }
     code
 }
@@ -76,7 +125,8 @@ fn return_() -> &'static str {
         "@R14",
         "M=D", // save endframe to R14
         "@5",
-        "D=D-A",
+        "A=D-A",
+        "D=M",
         "@R15",
         "M=D", // save retaddr to R15
         take!(1),
@@ -118,7 +168,7 @@ fn return_() -> &'static str {
     )
 }
 
-fn conditional(command: &Command, counter: u16) -> String {
+fn conditional(command: &Command, static_prefix: &str, counter: u16) -> String {
     let jump = match command {
         Eq => "JEQ",
         Gt => "JGT",
@@ -130,14 +180,15 @@ fn conditional(command: &Command, counter: u16) -> String {
             take!(2),
             "D=M-D",
             "M=-1",
-            "@COND_{c}",
+            "@COND_{static_prefix}_{counter}",
             "D;{jump}",
             "@SP",
             "A=M-1",
             "M=0",
-            "(COND_{c})",
+            "(COND_{static_prefix}_{counter})",
         ),
-        c = counter,
+        static_prefix = static_prefix,
+        counter = counter,
         jump = jump,
     )
 }
