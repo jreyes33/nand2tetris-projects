@@ -32,7 +32,7 @@ pub fn translate(commands: &[Option<Command>], static_prefix: &str) -> String {
 }
 
 pub fn boot() -> String {
-    // Set SP to 256 and static_prefix Sys.init.
+    // Set SP to 256 and call Sys.init.
     hasm!("@256", "D=A", "@SP", "M=D").to_string() + &call("Sys.init", "BOOT", 0, 0)
 }
 
