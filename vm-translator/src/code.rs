@@ -46,9 +46,25 @@ impl Translator {
                 self.cond_counter += 1;
                 code
             }
-            _ => arithmetic(command).to_string(),
+            Add | Sub | Neg | And | Or | Not => arithmetic(command).to_string(),
+            Label(ident) => label(ident),
+            Goto(ident) => goto(ident),
+            IfGoto(ident) => if_goto(ident),
+            pending => todo!("pls handle {:?}", pending),
         }
     }
+}
+
+fn label(ident: &str) -> String {
+    format!(hasm!("({ident})"), ident = ident)
+}
+
+fn goto(ident: &str) -> String {
+    format!(hasm!("@{ident}", "0;JMP"), ident = ident)
+}
+
+fn if_goto(ident: &str) -> String {
+    format!(hasm!(take!(1), "@{ident}", "D;JNE"), ident = ident)
 }
 
 fn conditional(command: &Command, counter: u16) -> String {
