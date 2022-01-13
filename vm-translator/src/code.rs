@@ -64,7 +64,7 @@ fn label(name: &str) -> String {
 fn function(name: &str, locals_count: u16) -> String {
     let mut code = label(name);
     for _ in 0..locals_count {
-        code.push_str(hasm!("@SP", "A=M", "M=0", "@SP", "M=M+1"));
+        code.push_str(hasm!("@SP", "AM=M+1", "A=A-1", "M=0"));
     }
     code
 }
