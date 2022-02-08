@@ -1,11 +1,8 @@
-mod code;
-mod parser;
-
-use code::{boot, translate};
-use parser::parse;
 use std::env::args;
 use std::path::Path;
 use std::{fs, process};
+use vm_translator::code::{boot, translate};
+use vm_translator::parser::parse;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
 
