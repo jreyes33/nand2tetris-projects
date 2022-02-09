@@ -1,7 +1,11 @@
+mod compiler;
+
+use compiler::Compiler;
 use std::env::args;
 use std::path::Path;
 use std::{fs, process};
 use tree_sitter::{Parser, Tree};
+use vm_translator::parser::Command;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
 
@@ -53,10 +57,18 @@ fn compile_file<P: AsRef<Path>>(path: P) -> Result<()> {
     Ok(())
 }
 
-fn compile_str(input: &str, static_prefix: &str) -> Result<String> {
+fn compile_str(input: &str, class_name: &str) -> Result<String> {
     let tree = parse(input)?;
-    dbg!(tree);
-    Ok("foo".into())
+    let cursor = tree.walk();
+    let mut compiler = Compiler::new(input, cursor);
+    let commands = compiler.compile()?;
+    let mut out = String::new();
+    for cmd in commands {
+        out += &command_to_str(cmd, class_name);
+        out += "\n";
+    }
+    println!("\n========== vm commands ==========\n{}", out);
+    Ok(out)
 }
 
 fn parse(input: &str) -> Result<Tree> {
@@ -64,6 +76,18 @@ fn parse(input: &str) -> Result<Tree> {
     parser.set_language(tree_sitter_jack::language())?;
     let tree = parser.parse(input, None).ok_or("failed to parse")?;
     Ok(tree)
+}
+
+fn command_to_str<'c>(command: &'c Command, class_name: &str) -> String {
+    use Command::*;
+    match command {
+        Add => "add".to_string(),
+        Function(name, param_count) => format!("function {class_name}.{name} {param_count}"),
+        Call(name, arg_count) => format!("call {name} {arg_count}"),
+        // TODO: implement Display for Segment.
+        Push(segment, n) => format!("push {} {n}", &(format!("{segment:?}")).to_lowercase()),
+        cmd => todo!("{cmd:?} in command_to_str"),
+    }
 }
 
 fn file_stem(path: &Path) -> Result<&str> {
@@ -74,6 +98,7 @@ fn file_stem(path: &Path) -> Result<&str> {
     Ok(stem)
 }
 
+#[allow(unused)]
 fn exit_with_error<V, E: std::error::Error>(e: E) -> V {
     eprintln!("{}", e);
     process::exit(65)
